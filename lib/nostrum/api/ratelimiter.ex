@@ -34,17 +34,27 @@ defmodule Nostrum.Api.Ratelimiter do
 
   def init([]) do
     :ets.new(:ratelimit_buckets, [:set, :public, :named_table])
+    # Start the old route cleanup loop
+    Process.send_after(self(), :remove_old_buckets, :timer.minutes(30))
+
+    {:ok, create_connection()}
+  end
+
+  def create_connection() do
     domain = to_charlist(Constants.domain())
 
-    open_opts = %{retry: 1_000_000_000, tls_opts: Constants.gun_tls_opts()}
+    open_opts = %{
+      retry: 1_000_000_000,
+      tls_opts: Constants.gun_tls_opts(),
+      http_opts: %{keepalive: :infinity},
+      http2_opts: %{keepalive: :infinity},
+      ws_opts: %{keepalive: :infinity}
+    }
     {:ok, conn_pid} = :gun.open(domain, 443, open_opts)
 
     {:ok, :http2} = :gun.await_up(conn_pid)
 
-    # Start the old route cleanup loop
-    Process.send_after(self(), :remove_old_buckets, :timer.hours(1))
-
-    {:ok, conn_pid}
+    conn_pid
   end
 
   @doc """
@@ -90,10 +100,17 @@ defmodule Nostrum.Api.Ratelimiter do
     {:noreply, state}
   end
 
-  def handle_info(:remove_old_buckets, state) do
+  def handle_info(:remove_old_buckets, conn_pid_state) do
     Bucket.remove_old_buckets()
-    Process.send_after(self(), :remove_old_buckets, :timer.hours(1))
-    {:noreply, state}
+    Process.send_after(self(), :remove_old_buckets, :timer.minutes(30))
+    :ok = close_connection(conn_pid_state)
+
+    # Create a new connection due to {:error, :stream_closed} errors
+    {:noreply, create_connection()}
+  end
+
+  def close_connection(conn) do
+    :ok = :gun.shutdown(conn)
   end
 
   defp do_request(request, conn) do
