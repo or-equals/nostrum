@@ -5,6 +5,8 @@ defmodule Nostrum.Api.Base do
 
   import Nostrum.Constants, only: [base_route: 0]
 
+  alias Nostrum.Api.Ratelimiter
+
   @type methods :: :get | :post | :put | :delete
 
   @spec request(pid, methods(), String.t(), iodata(), [{String.t(), String.t()}], Enum.t()) ::
@@ -13,7 +15,7 @@ defmodule Nostrum.Api.Base do
   def request(conn, method, route, body, raw_headers, params) do
     headers = process_request_headers(raw_headers)
     # Convert method from atom to string for `:gun`
-    method =
+    method_as_string =
       method
       |> Atom.to_string()
       |> String.upcase()
@@ -22,7 +24,7 @@ defmodule Nostrum.Api.Base do
 
     full_route = "#{base_route()}#{route}?#{query_string}"
     headers = process_request_headers(headers, body)
-    stream = :gun.request(conn, method, full_route, headers, process_request_body(body))
+    stream = :gun.request(conn, method_as_string, full_route, headers, process_request_body(body))
 
     case :gun.await(conn, stream) do
       {:response, :fin, status, headers} ->
@@ -31,6 +33,16 @@ defmodule Nostrum.Api.Base do
       {:response, :nofin, status, headers} ->
         {:ok, body} = :gun.await_body(conn, stream)
         {:ok, {status, headers, body}}
+
+      {:error, {:stream_error, :closed}} ->
+        # Temporarily spin up a new connection to handle the request
+        # Send a message to the Ratelimiter GenServer to spin up a new connection
+        # And then close the temporary connection
+        new_connection = Ratelimiter.create_connection()
+        response = request(new_connection, method, route, body, raw_headers, params)
+        Process.send(Ratelimiter, :remove_old_buckets, [:noconnect])
+        :ok = Ratelimiter.close_connection(new_connection)
+        response
 
       {:error, _reason} = result ->
         result
