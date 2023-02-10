@@ -35,7 +35,7 @@ defmodule Nostrum.Api.Ratelimiter do
   def init([]) do
     :ets.new(:ratelimit_buckets, [:set, :public, :named_table])
     # Start the old route cleanup loop
-    Process.send_after(self(), :remove_old_buckets, :timer.minutes(30))
+    Process.send_after(self(), :remove_old_buckets, :timer.minutes(15))
 
     {:ok, create_connection()}
   end
@@ -102,7 +102,7 @@ defmodule Nostrum.Api.Ratelimiter do
 
   def handle_info(:remove_old_buckets, conn_pid_state) do
     Bucket.remove_old_buckets()
-    Process.send_after(self(), :remove_old_buckets, :timer.minutes(30))
+    Process.send_after(self(), :remove_old_buckets, :timer.minutes(15))
     :ok = close_connection(conn_pid_state)
 
     # Create a new connection due to {:error, :stream_closed} errors

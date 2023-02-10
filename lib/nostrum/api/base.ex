@@ -36,11 +36,10 @@ defmodule Nostrum.Api.Base do
 
       {:error, {:stream_error, :closed}} ->
         # Temporarily spin up a new connection to handle the request
-        # Send a message to the Ratelimiter GenServer to spin up a new connection
         # And then close the temporary connection
+        # The Ratelimiter GenServer resets it's conn every 15 minutes, so a stale one will get cleaned up
         new_connection = Ratelimiter.create_connection()
         response = request(new_connection, method, route, body, raw_headers, params)
-        Process.send(Ratelimiter, :remove_old_buckets, [:noconnect])
         :ok = Ratelimiter.close_connection(new_connection)
         response
 
