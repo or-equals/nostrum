@@ -52,7 +52,7 @@ defmodule Nostrum.Api.Ratelimiter do
     }
     {:ok, conn_pid} = :gun.open(domain, 443, open_opts)
 
-    {:ok, :http2} = :gun.await_up(conn_pid)
+    {:ok, _} = :gun.await_up(conn_pid)
 
     conn_pid
   end
